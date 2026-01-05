@@ -1,0 +1,10 @@
+# Sensitive configuration files
+config.js
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
