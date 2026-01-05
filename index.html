@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>C3 Pipe Walker</title>
+    <link href='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css' rel='stylesheet' />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #f8f9fa; }
+        
+        #map { position: absolute; top: 0; left: 0; right: 0; bottom: 70px; width: 100%; }
+        #controls { position: absolute; bottom: 0; left: 0; right: 0; background: white; padding: 12px; box-shadow: 0 -2px 10px rgba(0,0,0,0.1); display: flex; gap: 8px; height: 70px; z-index: 1000; }
+        
+        #form-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #f8f9fa; overflow-y: auto; padding: 0; z-index: 2000; }
+        #form-panel.hidden { display: none; }
+        
+        .form-header { background: linear-gradient(135deg, #007bff 0%, #0056b3 100%); color: white; padding: 20px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .form-header h1 { font-size: 22px; margin-bottom: 5px; }
+        .form-header p { font-size: 14px; opacity: 0.9; }
+        
+        .form-section { background: white; margin: 15px; border-radius: 12px; padding: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.08); overflow: hidden; }
+        .section-header { padding: 16px; background: #f8f9fa; border-bottom: 1px solid #e9ecef; cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none; }
+        .section-header h3 { font-size: 16px; color: #333; font-weight: 600; }
+        .section-header .arrow { font-size: 14px; color: #999; transition: transform 0.3s; }
+        .section-header.active .arrow { transform: rotate(90deg); }
+        .section-content { padding: 20px; display: none; }
+        .section-content.active { display: block; }
+        
+        .button-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+        .button-grid.triple { grid-template-columns: repeat(3, 1fr); }
+        
+        .option-btn { padding: 16px 12px; background: white; border: 2px solid #dee2e6; border-radius: 10px; font-size: 14px; font-weight: 600; color: #495057; cursor: pointer; transition: all 0.2s; text-align: center; }
+        .option-btn:active { transform: scale(0.95); }
+        .option-btn.selected { background: #007bff; color: white; border-color: #0056b3; }
+        .option-btn.selected-alt { background: #28a745; color: white; border-color: #1e7e34; }
+        
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; font-size: 13px; font-weight: 600; color: #495057; margin-bottom: 8px; }
+        .input-group input, .input-group select { width: 100%; padding: 14px; border: 2px solid #dee2e6; border-radius: 10px; font-size: 15px; background: white; }
+        .input-group input:focus, .input-group select:focus { outline: none; border-color: #007bff; }
+        
+        .depth-input-wrapper { display: flex; gap: 10px; }
+        .depth-input-wrapper input { flex: 1; }
+        .unit-toggle { display: flex; background: white; border: 2px solid #dee2e6; border-radius: 10px; overflow: hidden; }
+        .unit-toggle button { padding: 14px 20px; border: none; background: white; color: #495057; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+        .unit-toggle button.active { background: #007bff; color: white; }
+        
+        .submit-btn { width: calc(100% - 30px); margin: 0 15px 20px 15px; padding: 18px; background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%); color: white; border: none; border-radius: 12px; font-size: 17px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3); }
+        .submit-btn:active { transform: scale(0.98); }
+        
+        .map-button { flex: 1; padding: 16px 12px; font-size: 15px; font-weight: 600; border: none; border-radius: 12px; cursor: pointer; transition: all 0.2s; }
+        .map-button.waypoint { background: #28a745; color: white; }
+        .map-button.continuous { background: #17a2b8; color: white; }
+        .map-button.back { background: #6c757d; color: white; }
+        .map-button.stop { background: #dc3545; color: white; }
+        .map-button:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        #status { position: absolute; top: 15px; left: 15px; background: rgba(255, 255, 255, 0.95); padding: 12px 16px; border-radius: 10px; font-size: 14px; font-weight: 600; box-shadow: 0 2px 10px rgba(0,0,0,0.2); z-index: 100; color: #333; }
+        #point-count { position: absolute; top: 55px; left: 15px; background: rgba(0, 123, 255, 0.95); color: white; padding: 10px 14px; border-radius: 10px; font-size: 13px; font-weight: 600; box-shadow: 0 2px 10px rgba(0,0,0,0.2); z-index: 100; }
+        
+        .hidden { display: none !important; }
+        
+        .photo-section { margin-bottom: 15px; }
+        .photo-btn { width: 100%; padding: 16px; background: #6c757d; color: white; border: none; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; }
+        #photo-capture { display: none; }
+        #photo-preview { width: 100%; max-height: 200px; object-fit: cover; border-radius: 10px; margin-top: 10px; display: none; }
+        
+        #phase-group, #developer-group { display: none; }
+        #phase-group.visible, #developer-group.visible { display: block; }
+    </style>
+</head>
+<body>
+    <div id="form-panel">
+        <div class="form-header">
+            <h1>C3 Pipe Walker</h1>
+            <p>Log your pipe run - tap to expand each section</p>
+        </div>
+        
+        <div class="form-section">
+            <div class="section-header active" onclick="toggleSection(this)">
+                <h3>Location</h3>
+                <span class="arrow">›</span>
+            </div>
+            <div class="section-content active">
+                <div class="input-group">
+                    <label>Site</label>
+                    <select id="site-select" required>
+                        <option value="">Select Site...</option>
+                        <option value="Garendon Park">Garendon Park</option>
+                        <option value="Bracebridge">Bracebridge</option>
+                        <option value="Sawtry">Sawtry</option>
+                        <option value="New Lubbesthorpe">New Lubbesthorpe</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <label>Division</label>
+                    <div class="button-grid" id="division-buttons">
+                        <button class="option-btn" data-field="division" data-value="Roads & Sewers">Roads & Sewers</button>
+                        <button class="option-btn" data-field="division" data-value="Housing">Housing</button>
+                    </div>
+                </div>
+                
+                <div class="input-group" id="developer-group">
+                    <label>Developer</label>
+                    <div class="button-grid">
+                        <button class="option-btn" data-field="developer" data-value="William Davis">William Davis</button>
+                        <button class="option-btn" data-field="developer" data-value="Persimmon">Persimmon</button>
+                    </div>
+                </div>
+                
+                <div class="input-group" id="phase-group">
+                    <label>Phase</label>
+                    <div class="button-grid triple">
+                        <button class="option-btn" data-field="phase" data-value="Phase 1">P1</button>
+                        <button class="option-btn" data-field="phase" data-value="Phase 2">P2</button>
+                        <button class="option-btn" data-field="phase" data-value="Phase 3">P3</button>
+                        <button class="option-btn" data-field="phase" data-value="Phase 4">P4</button>
+                        <button class="option-btn" data-field="phase" data-value="Phase 5">P5</button>
+                    </div>
+                </div>
+                
+                <div class="input-group">
+                    <label>Plot/Location (optional)</label>
+                    <input type="text" id="plot-location" placeholder="e.g. Plot 47, Block C">
+                </div>
+            </div>
+        </div>
+        
+        <div class="form-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3>Service Details</h3>
+                <span class="arrow">›</span>
+            </div>
+            <div class="section-content">
+                <div class="input-group">
+                    <label>Additional Flags</label>
+                    <div class="button-grid">
+                        <button class="option-btn" data-field="mains" data-value="yes">Adoptable Mains</button>
+                        <button class="option-btn" data-field="deep" data-value="yes">Deep Drainage (>3m)</button>
+                    </div>
+                    <small style="color: #6c757d; font-size: 12px;">Press if applicable, ignore if not</small>
+                </div>
+                
+                <div class="input-group">
+                    <label>Service Type</label>
+                    <div class="button-grid">
+                        <button class="option-btn" data-field="service-type" data-value="Foul" data-color="#8B4513">Foul</button>
+                        <button class="option-btn" data-field="service-type" data-value="Storm" data-color="#4682B4">Storm</button>
+                        <button class="option-btn" data-field="service-type" data-value="Water" data-color="#0000FF">Water</button>
+                        <button class="option-btn" data-field="service-type" data-value="Gas" data-color="#FFFF00">Gas</button>
+                        <button class="option-btn" data-field="service-type" data-value="Electric" data-color="#000000">Electric</button>
+                        <button class="option-btn" data-field="service-type" data-value="BT" data-color="#D3D3D3">BT</button>
+                        <button class="option-btn" data-field="service-type" data-value="Virgin" data-color="#00FF00">Virgin</button>
+                    </div>
+                </div>
+                
+                <div class="input-group">
+                    <label>Material</label>
+                    <div class="button-grid">
+                        <button class="option-btn" data-field="material" data-value="MDPE">MDPE</button>
+                        <button class="option-btn" data-field="material" data-value="Concrete">Concrete</button>
+                        <button class="option-btn" data-field="material" data-value="Clay">Clay</button>
+                        <button class="option-btn" data-field="material" data-value="uPVC">uPVC</button>
+                        <button class="option-btn" data-field="material" data-value="DI">Ductile Iron</button>
+                        <button class="option-btn" data-field="material" data-value="Copper">Copper</button>
+                    </div>
+                </div>
+                
+                <div class="input-group">
+                    <label>Diameter</label>
+                    <div class="button-grid triple">
+                        <button class="option-btn" data-field="diameter" data-value="63mm">63mm</button>
+                        <button class="option-btn" data-field="diameter" data-value="90mm">90mm</button>
+                        <button class="option-btn" data-field="diameter" data-value="110mm">110mm</button>
+                        <button class="option-btn" data-field="diameter" data-value="150mm">150mm</button>
+                        <button class="option-btn" data-field="diameter" data-value="225mm">225mm</button>
+                        <button class="option-btn" data-field="diameter" data-value="300mm">300mm</button>
+                        <button class="option-btn" data-field="diameter" data-value="375mm">375mm</button>
+                        <button class="option-btn" data-field="diameter" data-value="450mm">450mm</button>
+                    </div>
+                </div>
+                
+                <div class="input-group">
+                    <label>Depth</label>
+                    <div class="depth-input-wrapper">
+                        <input type="number" id="depth-value" placeholder="Enter depth" inputmode="decimal" step="0.1">
+                        <div class="unit-toggle">
+                            <button class="active" data-unit="mm" onclick="toggleDepthUnit(this)">mm</button>
+                            <button data-unit="m" onclick="toggleDepthUnit(this)">m</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="form-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3>Connection Points</h3>
+                <span class="arrow">›</span>
+            </div>
+            <div class="section-content">
+                <div class="input-group">
+                    <label>From (Start Point)</label>
+                    <input type="text" id="connection-from" placeholder="e.g. MH104, Plot 47 IC">
+                </div>
+                <div class="input-group">
+                    <label>To (End Point)</label>
+                    <input type="text" id="connection-to" placeholder="e.g. MH105, Adoptable Main">
+                </div>
+            </div>
+        </div>
+        
+        <div class="form-section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h3>Installation Details</h3>
+                <span class="arrow">›</span>
+            </div>
+            <div class="section-content">
+                <div class="input-group">
+                    <label>Installed By</label>
+                    <input type="text" id="installer" placeholder="Gang name or operator">
+                </div>
+                
+                <div class="input-group">
+                    <label>Installation Status</label>
+                    <div class="button-grid">
+                        <button class="option-btn" data-field="install-status" data-value="Trench Open">Trench Open</button>
+                        <button class="option-btn" data-field="install-status" data-value="Bedded">Bedded</button>
+                        <button class="option-btn" data-field="install-status" data-value="Pipe Laid">Pipe Laid</button>
+                        <button class="option-btn" data-field="install-status" data-value="Backfilled">Backfilled</button>
+                    </div>
+                </div>
+                
+                <div class="input-group">
+                    <label>Adoption Status</label>
+                    <div class="button-grid">
+                        <button class="option-btn" data-field="adoption-status" data-value="Adoptable">Adoptable</button>
+                        <button class="option-btn" data-field="adoption-status" data-value="Private">Private</button>
+                        <button class="option-btn" data-field="adoption-status" data-value="Pending">Pending</button>
+                    </div>
+                </div>
+                
+                <div class="photo-section">
+                    <button class="photo-btn" onclick="document.getElementById('photo-capture').click()">Take Photo of Trench</button>
+                    <input type="file" id="photo-capture" accept="image/*" capture="environment">
+                    <img id="photo-preview" alt="Photo preview">
+                </div>
+            </div>
+        </div>
+        
+        <button class="submit-btn" id="start-form-btn">Continue to Map</button>
+    </div>
+
+    <div id="map" class="hidden"></div>
+    <div id="status" class="hidden">Ready</div>
+    <div id="point-count" class="hidden">Points: 0</div>
+    
+    <div id="controls" class="hidden">
+        <button class="map-button back" id="back-btn">← Back</button>
+        <button class="map-button waypoint" id="waypoint-btn">Add Point</button>
+        <button class="map-button continuous" id="continuous-btn">Walk & Track</button>
+        <button class="map-button stop hidden" id="stop-btn">Stop & Save</button>
+    </div>
+
+    <script src='https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js'></script>
+    <script>
+        // CONFIG - Replace these values
+        const MAPBOX_TOKEN = 'pk.eyJ1Ijoic2l0ZWZsb3ciLCJhIjoiY21rMWFreXF1MDQzeDNjc2JuMDB6Mm56biJ9.cmqS2VCtx1lBqobraF9CbQ';
+        const WEBHOOK_URL = 'https://hook.eu1.make.com/kpbn7uaisfyv2rfj1vjxycerskcmobkw';
+        
+        // Check config
+        if (MAPBOX_TOKEN === 'pk.eyJ1Ijoic2l0ZWZsb3ciLCJhIjoiY21rMWFreXF1MDQzeDNjc2JuMDB6Mm56biJ9.cmqS2VCtx1lBqobraF9CbQ') {
+            alert('ERROR: Mapbox token not configured. Edit the HTML file and replace YOUR_MAPBOX_TOKEN_HERE with your actual token.');
+        }
+        
+        mapboxgl.accessToken = MAPBOX_TOKEN;
+        
+        // STATE
+        let formData = { site: null, division: null, developer: null, phase: null, mains: false, deep: false, depthUnit: 'mm' };
+        let photoBase64 = null;
+        let map = null;
+        let coordinates = [];
+        let trackingMode = null;
+        let watchID = null;
+        let wakeLock = null;
+        let userMarker = null;
+        
+        // LOCATION CHECK ON LOAD
+        window.addEventListener('DOMContentLoaded', function() {
+            checkLocationPermission();
+        });
+        
+        function checkLocationPermission() {
+            if (!navigator.geolocation) {
+                showLocationAlert('GPS not supported on this device.');
+                return;
+            }
+            
+            navigator.geolocation.getCurrentPosition(
+                function success() { /* Location is on */ },
+                function error(err) {
+                    if (err.code === 1) {
+                        showLocationAlert('Location permission denied. Enable location in browser settings.');
+                    } else if (err.code === 3) {
+                        showLocationAlert('Location services OFF. Turn on GPS in phone settings.');
+                    }
+                },
+                { timeout: 3000, maximumAge: 0 }
+            );
+        }
+        
+        function showLocationAlert(message) {
+            const alertDiv = document.createElement('div');
+            alertDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#dc3545;color:white;padding:15px;text-align:center;font-weight:600;z-index:9999;box-shadow:0 2px 10px rgba(0,0,0,0.3);';
+            alertDiv.innerHTML = `<div>${message}</div><button onclick="this.parentElement.remove()" style="margin-top:10px;padding:8px 20px;background:white;color:#dc3545;border:none;border-radius:5px;font-weight:600;cursor:pointer;">Dismiss</button>`;
+            document.body.prepend(alertDiv);
+        }
+        
+        // TOGGLE SECTIONS
+        function toggleSection(header) {
+            const content = header.nextElementSibling;
+            const isActive = content.classList.contains('active');
+            document.querySelectorAll('.section-content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.section-header').forEach(h => h.classList.remove('active'));
+            if (!isActive) {
+                content.classList.add('active');
+                header.classList.add('active');
+            }
+        }
+        
+        // SITE DROPDOWN
+        document.getElementById('site-select').addEventListener('change', function() {
+            formData.site = this.value;
+            const devGroup = document.getElementById('developer-group');
+            if (this.value === 'Garendon Park') {
+                devGroup.classList.add('visible');
+            } else {
+                devGroup.classList.remove('visible');
+                formData.developer = null;
+            }
+        });
+        
+        // OPTION BUTTONS
+        document.querySelectorAll('.option-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const field = this.dataset.field;
+                const value = this.dataset.value;
+                const color = this.dataset.color;
+                
+                if (field === 'mains' || field === 'deep') {
+                    this.classList.toggle('selected-alt');
+                    formData[field] = this.classList.contains('selected-alt');
+                    return;
+                }
+                
+                if (field === 'division') {
+                    const phaseGroup = document.getElementById('phase-group');
+                    if (value === 'Housing') {
+                        phaseGroup.classList.add('visible');
+                    } else {
+                        phaseGroup.classList.remove('visible');
+                        formData.phase = null;
+                    }
+                }
+                
+                this.parentElement.querySelectorAll('.option-btn').forEach(b => {
+                    if (b !== this) b.classList.remove('selected');
+                });
+                this.classList.add('selected');
+                formData[field] = value;
+                if (color) formData.serviceColor = color;
+            });
+        });
+        
+        // DEPTH UNIT TOGGLE
+        function toggleDepthUnit(btn) {
+            btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            formData.depthUnit = btn.dataset.unit;
+        }
+        
+        // PHOTO CAPTURE
+        document.getElementById('photo-capture').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    photoBase64 = event.target.result;
+                    const preview = document.getElementById('photo-preview');
+                    preview.src = photoBase64;
+                    preview.style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        // FORM SUBMIT
+        document.getElementById('start-form-btn').addEventListener('click', function() {
+            const required = ['site', 'division', 'service-type', 'material', 'diameter', 'install-status', 'adoption-status'];
+            for (let field of required) {
+                if (!formData[field]) {
+                    alert(`Please select: ${field.replace('-', ' ')}`);
+                    return;
+                }
+            }
+            
+            const connectionFrom = document.getElementById('connection-from').value;
+            const connectionTo = document.getElementById('connection-to').value;
+            const installer = document.getElementById('installer').value;
+            
+            if (!connectionFrom || !connectionTo || !installer) {
+                alert('Please fill in connection points and installer name');
+                return;
+            }
+            
+            if (formData.division === 'Housing' && !formData.phase) {
+                alert('Please select a phase');
+                return;
+            }
+            
+            formData.plotLocation = document.getElementById('plot-location').value;
+            formData.connectionFrom = connectionFrom;
+            formData.connectionTo = connectionTo;
+            formData.installer = installer;
+            
+            const depthValue = parseFloat(document.getElementById('depth-value').value);
+            if (depthValue) {
+                formData.depth = formData.depthUnit === 'm' ? depthValue * 1000 : depthValue;
+            }
+            
+            document.getElementById('form-panel').classList.add('hidden');
+            document.getElementById('map').classList.remove('hidden');
+            document.getElementById('status').classList.remove('hidden');
+            document.getElementById('controls').classList.remove('hidden');
+            
+            initMap();
+        });
+        
+        // INIT MAP
+        function initMap() {
+            map = new mapboxgl.Map({
+                container: 'map',
+                style: 'mapbox://styles/mapbox/satellite-streets-v12',
+                center: [-1.204, 52.768],
+                zoom: 17
+            });
+            
+            map.on('load', () => {
+                map.addSource('current-run', {
+                    type: 'geojson',
+                    data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } }
+                });
+                
+                map.addLayer({
+                    id: 'current-run-line',
+                    type: 'line',
+                    source: 'current-run',
+                    paint: { 'line-color': formData.serviceColor || '#ff0000', 'line-width': 4, 'line-opacity': 0.9 }
+                });
+                
+                getCurrentLocation();
+            });
+            
+            map.addControl(new mapboxgl.NavigationControl());
+        }
+        
+        function getCurrentLocation() {
+            if (!navigator.geolocation) { alert('GPS not supported'); return; }
+            
+            // Initial position
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const lngLat = [position.coords.longitude, position.coords.latitude];
+                    map.setCenter(lngLat);
+                    userMarker = new mapboxgl.Marker({ color: '#007bff' }).setLngLat(lngLat).addTo(map);
+                    
+                    // Show accuracy circle if poor
+                    const accuracy = position.coords.accuracy;
+                    if (accuracy > 10) {
+                        document.getElementById('status').innerText = `GPS Ready (±${Math.round(accuracy)}m)`;
+                    } else {
+                        document.getElementById('status').innerText = 'GPS Ready';
+                    }
+                },
+                (error) => alert('GPS Error: ' + error.message),
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+            
+            // Continuous position tracking for real-time marker updates
+            const positionWatchId = navigator.geolocation.watchPosition(
+                (position) => {
+                    const lngLat = [position.coords.longitude, position.coords.latitude];
+                    if (userMarker) {
+                        userMarker.setLngLat(lngLat);
+                    }
+                    // Only recenter if user hasn't moved the map
+                    if (!map.isMoving() && trackingMode === null) {
+                        map.easeTo({ center: lngLat, duration: 1000 });
+                    }
+                },
+                null,
+                { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+            );
+        }
+        
+        // BACK BUTTON
+        document.getElementById('back-btn').addEventListener('click', function() {
+            if (trackingMode !== null) {
+                if (!confirm('You have started tracking. Going back will lose progress. Continue?')) return;
+                if (watchID) navigator.geolocation.clearWatch(watchID);
+                if (wakeLock) wakeLock.release();
+            }
+            coordinates = [];
+            trackingMode = null;
+            document.getElementById('form-panel').classList.remove('hidden');
+            document.getElementById('map').classList.add('hidden');
+            document.getElementById('status').classList.add('hidden');
+            document.getElementById('controls').classList.add('hidden');
+            document.getElementById('point-count').classList.add('hidden');
+        });
+        
+        // WAYPOINT MODE
+        document.getElementById('waypoint-btn').addEventListener('click', function() {
+            if (trackingMode === 'continuous') return;
+            trackingMode = 'waypoint';
+            
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const lng = position.coords.longitude;
+                    const lat = position.coords.latitude;
+                    const accuracy = position.coords.accuracy;
+                    
+                    // Warn if accuracy is poor
+                    if (accuracy > 15) {
+                        if (!confirm(`GPS accuracy is ±${Math.round(accuracy)}m. Add point anyway?`)) {
+                            return;
+                        }
+                    }
+                    
+                    coordinates.push([lng, lat]);
+                    updateMapLine();
+                    
+                    document.getElementById('point-count').classList.remove('hidden');
+                    document.getElementById('point-count').innerText = `Points: ${coordinates.length}`;
+                    document.getElementById('stop-btn').classList.remove('hidden');
+                    document.getElementById('status').innerText = `Waypoint Mode (±${Math.round(accuracy)}m)`;
+                },
+                (error) => alert('GPS Error: ' + error.message),
+                { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+            );
+        });
+        
+        // CONTINUOUS MODE
+        document.getElementById('continuous-btn').addEventListener('click', async function() {
+            if (trackingMode === 'waypoint') return;
+            trackingMode = 'continuous';
+            
+            // Request wake lock
+            try { 
+                wakeLock = await navigator.wakeLock.request('screen');
+                console.log('Wake lock active');
+            } catch(e) {
+                console.log('Wake lock failed:', e);
+            }
+            
+            this.classList.add('hidden');
+            document.getElementById('waypoint-btn').disabled = true;
+            document.getElementById('stop-btn').classList.remove('hidden');
+            document.getElementById('point-count').classList.remove('hidden');
+            document.getElementById('status').innerText = 'Recording...';
+            
+            coordinates = [];
+            
+            watchID = navigator.geolocation.watchPosition(
+                (position) => {
+                    const lng = position.coords.longitude;
+                    const lat = position.coords.latitude;
+                    const accuracy = position.coords.accuracy;
+                    
+                    // Only add point if accuracy is reasonable (under 20m)
+                    if (accuracy < 20) {
+                        coordinates.push([lng, lat]);
+                        updateMapLine();
+                        
+                        // Update user marker
+                        if (userMarker) {
+                            userMarker.setLngLat([lng, lat]);
+                        }
+                        
+                        // Center map on current position (with smooth animation)
+                        map.easeTo({
+                            center: [lng, lat],
+                            duration: 1000
+                        });
+                        
+                        document.getElementById('point-count').innerText = `Points: ${coordinates.length} (±${Math.round(accuracy)}m)`;
+                    } else {
+                        console.log('Skipping inaccurate point:', accuracy);
+                    }
+                },
+                (error) => {
+                    console.error('GPS Error:', error);
+                    alert('GPS signal lost. Try moving to an area with better sky visibility.');
+                },
+                { 
+                    enableHighAccuracy: true,
+                    maximumAge: 0,
+                    timeout: 5000
+                }
+            );
+        });
+        
+        function updateMapLine() {
+            map.getSource('current-run').setData({
+                type: 'Feature',
+                geometry: { type: 'LineString', coordinates: coordinates }
+            });
+        }
+        
+        // STOP & SAVE
+        document.getElementById('stop-btn').addEventListener('click', function() {
+            if (trackingMode === 'continuous' && watchID) navigator.geolocation.clearWatch(watchID);
+            if (wakeLock) wakeLock.release();
+            if (coordinates.length === 0) { alert('No points recorded'); return; }
+            document.getElementById('status').innerText = 'Uploading...';
+            this.disabled = true;
+            submitData();
+        });
+        
+        // SUBMIT DATA
+        function submitData() {
+            const payload = {
+                ...formData,
+                coordinates: coordinates,
+                trackingMode: trackingMode,
+                pointCount: coordinates.length,
+                timestamp: new Date().toISOString(),
+                photo: photoBase64
+            };
+            
+            console.log('Submitting payload:', payload);
+            
+            fetch(WEBHOOK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.text(); // Changed from .json() to handle any response
+            })
+            .then(data => {
+                console.log('Response data:', data);
+                alert('Run saved successfully!');
+                setTimeout(() => location.reload(), 1000);
+            })
+            .catch(error => {
+                console.error('Upload error:', error);
+                alert(`Upload failed: ${error.message}. Check console for details.`);
+                document.getElementById('stop-btn').disabled = false;
+                document.getElementById('status').innerText = 'Upload Failed - Try Again';
+            });
+        }
+    </script>
+</body>
+</html>
